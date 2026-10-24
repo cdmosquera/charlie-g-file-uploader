@@ -61,6 +61,11 @@ sudo bash setup.sh
 
 It asks for the domain, your Google Client ID/secret and an admin password. Then add `https://<your-domain>/auth/google/callback` as a redirect URI in Google Cloud and open `https://<your-domain>/admin`.
 
+To fix a setting you entered wrong, without reinstalling:
+
+- `sudo bash setup.sh --google`: re-enter the Google Client ID and secret
+- `sudo bash setup.sh --password`: change the admin password
+
 To update later, pull the new code and run `sudo bash setup.sh` again. Your settings in `/etc/drive-drop/drive-drop.env` and your data in `/var/lib/drive-drop` are kept.
 
 ### Other hosts

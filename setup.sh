@@ -11,6 +11,10 @@
 #   - runs the app as a background service that starts on boot
 #
 # Running it again later updates the app code and keeps your existing settings.
+#
+# Change settings after the first install (no reinstall needed):
+#   sudo bash setup.sh --google     re-enter the Google Client ID and secret
+#   sudo bash setup.sh --password   change the admin password
 set -euo pipefail
 
 APP_USER=drive-drop
@@ -45,6 +49,58 @@ ask() {
   printf -v "$var" '%s' "$value"
 }
 
+# ask_confirmed VAR "Question" "what"  — hidden input, typed twice so typos are caught
+ask_confirmed() {
+  local var=$1 prompt=$2 what=$3 again
+  while :; do
+    ask "$var" "$prompt" secret
+    if [[ ${!var} == *"'"* ]]; then
+      warn "Please don't use the ' character."
+    else
+      read -rsp "Repeat $what: " again; echo
+      [[ $again == "${!var}" ]] && return
+      warn "The ${what}s didn't match, try again."
+    fi
+    printf -v "$var" '%s' ''
+  done
+}
+
+ask_password() { ask_confirmed ADMIN_PASSWORD "Admin password for the dashboard" "admin password"; }
+ask_google_secret() { ask_confirmed GOOGLE_CLIENT_SECRET "Google Client secret" "Google Client secret"; }
+
+# set_env KEY VALUE  — replaces (or adds) one line in the settings file, keeping its permissions
+set_env() {
+  local tmp
+  [[ $2 == *"'"* ]] && die "The value for $1 can't contain the ' character."
+  tmp=$(mktemp)
+  grep -v "^$1=" "$ENV_FILE" > "$tmp" || true
+  printf "%s='%s'\n" "$1" "$2" >> "$tmp"
+  cat "$tmp" > "$ENV_FILE"
+  rm -f "$tmp"
+}
+
+case "${1:-}" in
+  "") ;;
+  --google|--password)
+    [[ -f $ENV_FILE ]] || die "No settings yet. Run  sudo bash setup.sh  first."
+    if [[ $1 == --google ]]; then
+      ask GOOGLE_CLIENT_ID "Google Client ID"
+      ask_google_secret
+      set_env GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
+      set_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
+    else
+      ask_password
+      set_env ADMIN_PASSWORD "$ADMIN_PASSWORD"
+    fi
+    systemctl restart "$SERVICE"
+    log "Saved and restarted the app."
+    [[ $1 == --google ]] && echo "If you changed to a different OAuth client, click \"Connect Google Drive\" in the dashboard again."
+    exit 0
+    ;;
+  -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) die "Unknown option: $1  (see: bash setup.sh --help)" ;;
+esac
+
 if [[ -f $ENV_FILE ]]; then
   log "Existing settings found in $ENV_FILE — keeping them (update mode)"
   BASE_URL=$(grep -E '^BASE_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d "'\"")
@@ -56,14 +112,8 @@ else
   ask DOMAIN "Domain"
   DOMAIN=${DOMAIN#https://}; DOMAIN=${DOMAIN#http://}; DOMAIN=${DOMAIN%%/*}
   ask GOOGLE_CLIENT_ID "Google Client ID"
-  ask GOOGLE_CLIENT_SECRET "Google Client secret" secret
-  while :; do
-    ask ADMIN_PASSWORD "Admin password for the dashboard" secret
-    [[ $ADMIN_PASSWORD == *"'"* ]] && { warn "Please don't use the ' character."; ADMIN_PASSWORD=; continue; }
-    read -rsp "Repeat admin password: " again; echo
-    [[ $again == "$ADMIN_PASSWORD" ]] && break
-    warn "Passwords didn't match, try again."; ADMIN_PASSWORD=
-  done
+  ask_google_secret
+  ask_password
   BASE_URL="https://$DOMAIN"
 fi
 

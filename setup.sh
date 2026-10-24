@@ -14,7 +14,7 @@
 #
 # Change settings after the first install (no reinstall needed):
 #   sudo bash setup.sh --google     re-enter the Google Client ID and secret
-#   sudo bash setup.sh --password   change the admin password
+#   sudo bash setup.sh --login      change the admin username and password
 set -euo pipefail
 
 APP_USER=drive-drop
@@ -65,6 +65,14 @@ ask_confirmed() {
   done
 }
 
+ask_username() {
+  while :; do
+    ask ADMIN_USERNAME "Admin username for the dashboard"
+    [[ $ADMIN_USERNAME =~ ^[A-Za-z0-9._@-]+$ ]] && return
+    warn "Use only letters, numbers and . _ @ - (no spaces)."
+    ADMIN_USERNAME=
+  done
+}
 ask_password() { ask_confirmed ADMIN_PASSWORD "Admin password for the dashboard" "admin password"; }
 ask_google_secret() { ask_confirmed GOOGLE_CLIENT_SECRET "Google Client secret" "Google Client secret"; }
 
@@ -81,7 +89,7 @@ set_env() {
 
 case "${1:-}" in
   "") ;;
-  --google|--password)
+  --google|--login|--password)
     [[ -f $ENV_FILE ]] || die "No settings yet. Run  sudo bash setup.sh  first."
     if [[ $1 == --google ]]; then
       ask GOOGLE_CLIENT_ID "Google Client ID"
@@ -89,7 +97,9 @@ case "${1:-}" in
       set_env GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
       set_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
     else
+      ask_username
       ask_password
+      set_env ADMIN_USERNAME "$ADMIN_USERNAME"
       set_env ADMIN_PASSWORD "$ADMIN_PASSWORD"
     fi
     systemctl restart "$SERVICE"
@@ -105,6 +115,11 @@ if [[ -f $ENV_FILE ]]; then
   log "Existing settings found in $ENV_FILE — keeping them (update mode)"
   BASE_URL=$(grep -E '^BASE_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d "'\"")
   DOMAIN=${BASE_URL#https://}
+  if ! grep -q '^ADMIN_USERNAME=' "$ENV_FILE"; then
+    echo "The dashboard now asks for a username as well as the password."
+    ask_username
+    set_env ADMIN_USERNAME "$ADMIN_USERNAME"
+  fi
 else
   log "A few questions (answers are saved to $ENV_FILE)"
   echo "Domain: the public name of this VM, e.g. myuploader.westeurope.cloudapp.azure.com"
@@ -113,6 +128,7 @@ else
   DOMAIN=${DOMAIN#https://}; DOMAIN=${DOMAIN#http://}; DOMAIN=${DOMAIN%%/*}
   ask GOOGLE_CLIENT_ID "Google Client ID"
   ask_google_secret
+  ask_username
   ask_password
   BASE_URL="https://$DOMAIN"
 fi
@@ -181,6 +197,7 @@ HOST=127.0.0.1
 PORT=$PORT
 GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET='$GOOGLE_CLIENT_SECRET'
+ADMIN_USERNAME='$ADMIN_USERNAME'
 ADMIN_PASSWORD='$ADMIN_PASSWORD'
 SESSION_SECRET=$(openssl rand -hex 32)
 DATA_DIR=$DATA_DIR

@@ -19,6 +19,8 @@
   <!-- Login -->
   <form id="login" class="card narrow hidden">
     <h2>Admin login</h2>
+    <label for="user">Username</label>
+    <input id="user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
     <label for="pw">Password</label>
     <input id="pw" type="password" autocomplete="current-password" required>
     <div style="margin-top:14px"><button>Log in</button></div>
@@ -184,7 +186,12 @@ $('links').addEventListener('click', async (e) => {
 
 $('login').addEventListener('submit', async (e) => {
   e.preventDefault();
-  try { await api('POST', '/api/admin/login', { password: $('pw').value }); init(); }
+  try {
+    await api('POST', '/api/admin/login', { username: $('user').value.trim(), password: $('pw').value });
+    $('pw').value = '';
+    $('loginErr').textContent = '';
+    init();
+  }
   catch (err) { $('loginErr').textContent = err.message; }
 });
 

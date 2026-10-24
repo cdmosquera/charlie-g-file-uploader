@@ -37,7 +37,7 @@ npm install
 cp .env.example .env
 ```
 
-Fill in `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_PASSWORD` and `SESSION_SECRET` in `.env`, then:
+Fill in `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `SESSION_SECRET` in `.env`, then:
 
 ```bash
 npm start
@@ -59,12 +59,12 @@ Open http://localhost:3000/admin, log in, click **Connect Google Drive**, and cr
 sudo bash setup.sh
 ```
 
-It asks for the domain, your Google Client ID/secret and an admin password. Then add `https://<your-domain>/auth/google/callback` as a redirect URI in Google Cloud and open `https://<your-domain>/admin`.
+It asks for the domain, your Google Client ID/secret and an admin username and password. Then add `https://<your-domain>/auth/google/callback` as a redirect URI in Google Cloud and open `https://<your-domain>/admin`.
 
 To fix a setting you entered wrong, without reinstalling:
 
 - `sudo bash setup.sh --google`: re-enter the Google Client ID and secret
-- `sudo bash setup.sh --password`: change the admin password
+- `sudo bash setup.sh --login`: change the admin username and password
 
 To update later, pull the new code and run `sudo bash setup.sh` again. Your settings in `/etc/drive-drop/drive-drop.env` and your data in `/var/lib/drive-drop` are kept.
 

@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT) || 3000;
 process.env.BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
 
-for (const key of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'ADMIN_PASSWORD']) {
+for (const key of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'ADMIN_USERNAME', 'ADMIN_PASSWORD']) {
   if (!process.env[key]) console.warn(`[warn] ${key} is not set — see .env.example`);
 }
 
@@ -110,10 +110,25 @@ app.get('/u/:slug', (req, res) => res.sendFile(path.join(__dirname, 'public', 'u
 
 // ---------- admin auth ----------
 
+// Slows down password guessing: 10 failed logins per IP per 15 minutes.
+const failedLogins = new Map();
+
 app.post('/api/admin/login', (req, res) => {
-  if (!process.env.ADMIN_PASSWORD || !safeEqual(req.body.password || '', process.env.ADMIN_PASSWORD)) {
-    return res.status(401).json({ error: 'Wrong password' });
+  const now = Date.now();
+  const recent = (failedLogins.get(req.ip) || []).filter((t) => now - t < 15 * 60 * 1000);
+  if (recent.length >= 10) {
+    return res.status(429).json({ error: 'Too many failed attempts. Try again in 15 minutes.' });
   }
+  const { ADMIN_USERNAME, ADMIN_PASSWORD } = process.env;
+  // Compare both so a wrong username takes as long as a wrong password.
+  const userOk = safeEqual(req.body.username || '', ADMIN_USERNAME || '');
+  const passOk = safeEqual(req.body.password || '', ADMIN_PASSWORD || '');
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD || !userOk || !passOk) {
+    recent.push(now);
+    failedLogins.set(req.ip, recent);
+    return res.status(401).json({ error: 'Wrong username or password' });
+  }
+  failedLogins.delete(req.ip);
   const exp = Date.now() + 7 * 24 * 3600 * 1000;
   setCookie(res, 'admin', `${exp}.${sign(`admin.${exp}`)}`, 7 * 24 * 3600);
   res.json({ ok: true });

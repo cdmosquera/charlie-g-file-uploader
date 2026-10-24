@@ -1,0 +1,16 @@
+{
+  "name": "drive-drop",
+  "version": "1.0.0",
+  "description": "Share upload links that put files straight into your own Google Drive",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

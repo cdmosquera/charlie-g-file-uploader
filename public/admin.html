@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drive Drop — Admin</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="row spread">
+    <div>
+      <h1>Drive Drop</h1>
+      <div class="muted">Share a link, receive files in your Google Drive.</div>
+    </div>
+    <button id="logout" class="ghost hidden">Log out</button>
+  </div>
+
+  <!-- Login -->
+  <form id="login" class="card narrow hidden">
+    <h2>Admin login</h2>
+    <label for="pw">Password</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <div style="margin-top:14px"><button>Log in</button></div>
+    <div id="loginErr" class="error"></div>
+  </form>
+
+  <div id="app" class="hidden">
+    <!-- Google connection -->
+    <div class="card">
+      <div class="row spread">
+        <div>
+          <h2 style="margin:0">Google Drive</h2>
+          <div id="gStatus" class="muted"></div>
+        </div>
+        <div class="row">
+          <a id="connect" class="btn" href="/auth/google">Connect Google Drive</a>
+          <button id="disconnect" class="danger hidden">Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create link -->
+    <form id="create" class="card hidden">
+      <h2>New upload link</h2>
+      <div class="grid2">
+        <div>
+          <label for="title">Title shown to uploaders</label>
+          <input id="title" type="text" placeholder="e.g. Wedding photos" required>
+        </div>
+        <div>
+          <label for="folderName">Drive folder name <span class="muted small">(defaults to title)</span></label>
+          <input id="folderName" type="text">
+        </div>
+      </div>
+      <label for="description">Instructions <span class="muted small">(optional)</span></label>
+      <textarea id="description" placeholder="Tell people what to upload"></textarea>
+      <div class="grid2">
+        <div>
+          <label for="maxSizeMB">Max file size (MB) <span class="muted small">0 = no limit</span></label>
+          <input id="maxSizeMB" type="number" min="0" value="0">
+        </div>
+        <div>
+          <label for="allowedTypes">Allowed file types <span class="muted small">blank = any</span></label>
+          <input id="allowedTypes" type="text" placeholder="pdf, jpg, png, mp4">
+        </div>
+        <div>
+          <label for="password">Password <span class="muted small">(optional)</span></label>
+          <input id="password" type="text" autocomplete="off">
+        </div>
+        <div>
+          <label for="expiresAt">Expires <span class="muted small">(optional)</span></label>
+          <input id="expiresAt" type="datetime-local">
+        </div>
+      </div>
+      <label class="check"><input id="askName" type="checkbox" checked> Ask uploaders for their name</label>
+      <label class="check"><input id="requireName" type="checkbox"> Name is required</label>
+      <label class="check"><input id="perUploaderFolder" type="checkbox"> Put each uploader's files in their own subfolder</label>
+      <label class="check"><input id="askEmail" type="checkbox"> Ask uploaders for their email</label>
+      <div style="margin-top:16px"><button id="createBtn">Create link</button></div>
+      <div id="createErr" class="error"></div>
+    </form>
+
+    <!-- Links -->
+    <div class="card">
+      <h2>Your upload links</h2>
+      <div id="links" class="muted">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+async function init() {
+  const s = await api('GET', '/api/admin/status');
+  $('login').classList.toggle('hidden', s.loggedIn);
+  $('app').classList.toggle('hidden', !s.loggedIn);
+  $('logout').classList.toggle('hidden', !s.loggedIn);
+  if (!s.loggedIn) return;
+
+  $('gStatus').textContent = s.connected
+    ? `Connected as ${s.email || 'your Google account'} — uploads go to this Drive.`
+    : 'Not connected. Connect the Google account whose Drive should receive files.';
+  $('connect').textContent = s.connected ? 'Reconnect' : 'Connect Google Drive';
+  $('connect').classList.toggle('ghost', s.connected);
+  $('disconnect').classList.toggle('hidden', !s.connected);
+  $('create').classList.toggle('hidden', !s.connected);
+  const err = new URLSearchParams(location.search).get('error');
+  if (err) $('gStatus').innerHTML += `<div class="error">Google returned: ${esc(err)}</div>`;
+  loadLinks();
+}
+
+async function loadLinks() {
+  const links = await api('GET', '/api/admin/links');
+  if (!links.length) { $('links').textContent = 'No links yet.'; return; }
+  $('links').classList.remove('muted');
+  $('links').innerHTML = links.map((l) => `
+    <div class="link-item" data-id="${l.id}">
+      <div class="row spread">
+        <div class="row">
+          <strong>${esc(l.title)}</strong>
+          <span class="pill ${l.state === 'open' ? '' : 'off'}">${l.state}</span>
+          ${l.hasPassword ? '<span class="pill off">password</span>' : ''}
+        </div>
+        <span class="muted small">${l.uploadCount} upload${l.uploadCount === 1 ? '' : 's'}</span>
+      </div>
+      <div class="link-url" style="margin:6px 0">${esc(l.url)}</div>
+      <div class="row">
+        <button class="ghost" data-act="copy" data-url="${esc(l.url)}">Copy link</button>
+        <a class="btn ghost" href="${esc(l.url)}" target="_blank">Open</a>
+        ${l.folderUrl ? `<a class="btn ghost" href="${esc(l.folderUrl)}" target="_blank">Drive folder</a>` : ''}
+        <button class="ghost" data-act="uploads">Uploads</button>
+        <button class="ghost" data-act="toggle" data-active="${l.active}">${l.active ? 'Disable' : 'Enable'}</button>
+        <button class="danger" data-act="delete">Delete</button>
+      </div>
+      <div class="uploads hidden"></div>
+    </div>`).join('');
+}
+
+$('links').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const item = btn.closest('.link-item');
+  const id = item.dataset.id;
+  try {
+    if (btn.dataset.act === 'copy') {
+      await navigator.clipboard.writeText(btn.dataset.url);
+      btn.textContent = 'Copied!';
+      setTimeout(() => (btn.textContent = 'Copy link'), 1500);
+    } else if (btn.dataset.act === 'toggle') {
+      await api('PATCH', `/api/admin/links/${id}`, { active: btn.dataset.active !== 'true' });
+      loadLinks();
+    } else if (btn.dataset.act === 'delete') {
+      if (!confirm('Delete this link? Files already in Drive are kept.')) return;
+      await api('DELETE', `/api/admin/links/${id}`);
+      loadLinks();
+    } else if (btn.dataset.act === 'uploads') {
+      const box = item.querySelector('.uploads');
+      if (!box.classList.toggle('hidden')) {
+        const ups = await api('GET', `/api/admin/links/${id}/uploads`);
+        box.innerHTML = ups.length ? `<table><tr><th>File</th><th>Size</th><th>From</th><th>When</th></tr>${ups.map((u) => `
+          <tr><td><a href="${esc(u.url)}" target="_blank">${esc(u.fileName)}</a></td><td>${fmtSize(u.size)}</td>
+          <td>${esc(u.uploader || '—')}${u.uploaderEmail ? `<br><span class="muted">${esc(u.uploaderEmail)}</span>` : ''}</td>
+          <td>${new Date(u.at).toLocaleString()}</td></tr>`).join('')}</table>`
+          : '<div class="muted small" style="margin-top:8px">No uploads yet.</div>';
+      }
+    }
+  } catch (err) { alert(err.message); }
+});
+
+$('login').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try { await api('POST', '/api/admin/login', { password: $('pw').value }); init(); }
+  catch (err) { $('loginErr').textContent = err.message; }
+});
+
+$('logout').addEventListener('click', async () => { await api('POST', '/api/admin/logout'); init(); });
+
+$('disconnect').addEventListener('click', async () => {
+  if (!confirm('Disconnect Google Drive? Upload links will stop working until you reconnect.')) return;
+  await api('POST', '/api/admin/disconnect');
+  init();
+});
+
+$('create').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('createErr').textContent = '';
+  $('createBtn').disabled = true;
+  try {
+    const exp = $('expiresAt').value;
+    await api('POST', '/api/admin/links', {
+      title: $('title').value,
+      folderName: $('folderName').value,
+      description: $('description').value,
+      maxSizeMB: $('maxSizeMB').value,
+      allowedTypes: $('allowedTypes').value,
+      password: $('password').value,
+      expiresAt: exp ? new Date(exp).toISOString() : null,
+      askName: $('askName').checked,
+      requireName: $('requireName').checked,
+      perUploaderFolder: $('perUploaderFolder').checked,
+      askEmail: $('askEmail').checked,
+    });
+    $('create').reset();
+    loadLinks();
+  } catch (err) { $('createErr').textContent = err.message; }
+  $('createBtn').disabled = false;
+});
+
+init();
+</script>
+</body>
+</html>

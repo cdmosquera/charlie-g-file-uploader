@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upload files</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap narrow">
+  <h1 id="title">Upload files</h1>
+  <div id="desc" class="muted" style="white-space:pre-wrap"></div>
+
+  <div id="closed" class="card hidden"></div>
+
+  <form id="lock" class="card hidden">
+    <h2>This link is password protected</h2>
+    <input id="pw" type="password" placeholder="Password" required>
+    <div style="margin-top:12px"><button>Continue</button></div>
+    <div id="lockErr" class="error"></div>
+  </form>
+
+  <div id="main" class="hidden">
+    <div id="who" class="card hidden">
+      <div id="nameRow" class="hidden">
+        <label for="name" style="margin-top:0">Your name <span id="nameOpt" class="muted small">(optional)</span></label>
+        <input id="name" type="text" autocomplete="name">
+      </div>
+      <div id="emailRow" class="hidden">
+        <label for="email">Your email <span class="muted small">(optional)</span></label>
+        <input id="email" type="email" autocomplete="email">
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="drop" class="drop">
+        <strong>Drop files here</strong> or <span style="color:var(--accent)">browse</span>
+        <div id="rules" class="muted small" style="margin-top:6px"></div>
+        <input id="picker" type="file" multiple hidden>
+      </div>
+      <div id="files" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const slug = location.pathname.split('/').pop();
+const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
+let link, password = '';
+
+async function post(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+async function init() {
+  const res = await fetch(`/api/links/${slug}`);
+  const data = await res.json();
+  if (!res.ok || data.state !== 'open') {
+    $('closed').textContent = data.error || `This upload link is ${data.state}.`;
+    $('closed').classList.remove('hidden');
+    if (data.title) $('title').textContent = data.title;
+    return;
+  }
+  link = data;
+  document.title = `Upload — ${link.title}`;
+  $('title').textContent = link.title;
+  $('desc').textContent = link.description || '';
+  if (link.needsPassword) $('lock').classList.remove('hidden');
+  else showMain();
+}
+
+function showMain() {
+  $('lock').classList.add('hidden');
+  $('main').classList.remove('hidden');
+  if (link.askName || link.askEmail) $('who').classList.remove('hidden');
+  $('nameRow').classList.toggle('hidden', !link.askName);
+  $('emailRow').classList.toggle('hidden', !link.askEmail);
+  if (link.requireName) $('nameOpt').textContent = '(required)';
+  const rules = [];
+  if (link.allowedTypes.length) {
+    rules.push(`Allowed: ${link.allowedTypes.join(', ')}`);
+    $('picker').accept = link.allowedTypes.join(',');
+  }
+  if (link.maxSizeMB) rules.push(`Max ${link.maxSizeMB} MB per file`);
+  $('rules').textContent = rules.join(' · ');
+}
+
+$('lock').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await post(`/api/links/${slug}/unlock`, { password: $('pw').value });
+    password = $('pw').value;
+    showMain();
+  } catch (err) { $('lockErr').textContent = err.message; }
+});
+
+const drop = $('drop');
+drop.addEventListener('click', () => $('picker').click());
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); });
+$('picker').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+
+// Upload a few files at a time so a big batch doesn't saturate the connection.
+const queue = [];
+let running = 0;
+const MAX_PARALLEL = 3;
+
+function addFiles(list) {
+  if (link.requireName && !$('name').value.trim()) {
+    $('name').focus();
+    alert('Please enter your name first.');
+    return;
+  }
+  for (const file of list) {
+    const row = document.createElement('div');
+    row.className = 'file';
+    row.innerHTML = `<div class="row spread"><div class="name"></div><div class="status muted small">Waiting…</div></div><div class="bar"><i></i></div>`;
+    row.querySelector('.name').textContent = `${file.name} (${fmtSize(file.size)})`;
+    $('files').prepend(row);
+    queue.push({ file, row });
+  }
+  pump();
+}
+
+function pump() {
+  while (running < MAX_PARALLEL && queue.length) {
+    const job = queue.shift();
+    running++;
+    upload(job).finally(() => { running--; pump(); });
+  }
+}
+
+async function upload({ file, row }) {
+  const status = row.querySelector('.status');
+  const bar = row.querySelector('.bar > i');
+  const fail = (msg) => { row.classList.add('failed'); status.className = 'status status-err small'; status.textContent = msg; bar.style.width = '100%'; };
+  try {
+    status.textContent = 'Starting…';
+    const { uploadUrl, uploadId } = await post(`/api/links/${slug}/session`, {
+      password,
+      name: $('name').value,
+      email: $('email').value,
+      file: { name: file.name, size: file.size, type: file.type },
+    });
+
+    // Bytes go straight from the browser to Google Drive.
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl);
+      if (file.type) xhr.setRequestHeader('Content-Type', file.type);
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const pct = Math.round((e.loaded / e.total) * 100);
+        bar.style.width = `${pct}%`;
+        status.textContent = `${pct}%`;
+      };
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300)
+        ? resolve(JSON.parse(xhr.responseText || '{}'))
+        : reject(new Error(`Upload failed (${xhr.status})`));
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.send(file);
+    });
+
+    await post(`/api/links/${slug}/complete`, { uploadId, fileId: result.id });
+    row.classList.add('done');
+    bar.style.width = '100%';
+    status.className = 'status status-ok small';
+    status.textContent = 'Uploaded ✓';
+  } catch (err) {
+    fail(err.message);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

@@ -47,6 +47,24 @@ Open http://localhost:3000/admin, log in, click **Connect Google Drive**, and cr
 
 ## 3. Deploy so others can use the links
 
+### Azure VM (Ubuntu)
+
+`setup.sh` installs everything on a fresh Ubuntu VM: Node.js, the app as a background service, and Caddy for automatic HTTPS.
+
+1. In the Azure portal, give the VM a DNS name (VM → Overview → DNS name → Configure), or point your own domain at its public IP.
+2. Allow inbound ports **80** and **443** (VM → Networking).
+3. Get the code onto the VM (for example `git clone` your repository), then run this from the project folder:
+
+```bash
+sudo bash setup.sh
+```
+
+It asks for the domain, your Google Client ID/secret and an admin password. Then add `https://<your-domain>/auth/google/callback` as a redirect URI in Google Cloud and open `https://<your-domain>/admin`.
+
+To update later, pull the new code and run `sudo bash setup.sh` again. Your settings in `/etc/drive-drop/drive-drop.env` and your data in `/var/lib/drive-drop` are kept.
+
+### Other hosts
+
 Any Node host works (Render, Railway, Fly.io, a VPS…). Things to set:
 
 - Environment variables from `.env.example`, with `BASE_URL` set to your public https URL.

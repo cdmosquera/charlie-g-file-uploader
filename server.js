@@ -344,4 +344,4 @@ app.post('/api/links/:slug/complete', asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.listen(PORT, () => console.log(`Drive Drop running at ${process.env.BASE_URL} (admin: ${process.env.BASE_URL}/admin)`));
+app.listen(PORT, process.env.HOST || '0.0.0.0', () => console.log(`Drive Drop running at ${process.env.BASE_URL} (admin: ${process.env.BASE_URL}/admin)`));
